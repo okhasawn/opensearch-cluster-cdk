@@ -25,12 +25,15 @@ import {
   InstanceSize,
   InstanceType,
   MachineImage,
-  SubnetType,
+  SubnetType, InitFile,
 } from 'aws-cdk-lib/aws-ec2';
-import { NetworkListener, NetworkLoadBalancer, Protocol } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import {
+  CfnLoadBalancer, NetworkListener, NetworkLoadBalancer, Protocol,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import { InstanceTarget } from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 import {
-  ManagedPolicy, Role,
+  Effect,
+  ManagedPolicy, PolicyStatement, Role,
   ServicePrincipal,
 } from 'aws-cdk-lib/aws-iam';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
@@ -50,6 +53,8 @@ export interface infraProps extends StackProps {
   readonly securityDisabled: boolean,
   readonly minDistribution: boolean,
   readonly distributionUrl: string,
+  readonly captureProxyEnabled: string,
+  readonly captureProxyTarUrl: string,
   readonly dashboardsUrl: string,
   readonly singleNodeCluster: boolean,
   readonly managerNodeCount: number,
@@ -74,6 +79,29 @@ export interface infraProps extends StackProps {
 export class InfraStack extends Stack {
   private instanceRole: Role;
 
+  addKafkaProducerIAMPolicies(role: Role) {
+    const mskClusterArn = `arn:aws:kafka:${this.region}:${this.account}:cluster/migration-msk-cluster-*/*`;
+    const mskClusterConnectPolicy = new PolicyStatement({
+      effect: Effect.ALLOW,
+      resources: [mskClusterArn],
+      actions: [
+        'kafka-cluster:Connect',
+      ],
+    });
+    const mskClusterAllTopicArn = `arn:aws:kafka:${this.region}:${this.account}:topic/migration-msk-cluster-*/*`;
+    const mskTopicProducerPolicy = new PolicyStatement({
+      effect: Effect.ALLOW,
+      resources: [mskClusterAllTopicArn],
+      actions: [
+        'kafka-cluster:CreateTopic',
+        'kafka-cluster:DescribeTopic',
+        'kafka-cluster:WriteData',
+      ],
+    });
+    role.addToPolicy(mskClusterConnectPolicy);
+    role.addToPolicy(mskTopicProducerPolicy);
+  }
+
   constructor(scope: Stack, id: string, props: infraProps) {
     super(scope, id, props);
     let opensearchListener: NetworkListener;
@@ -85,8 +113,8 @@ export class InfraStack extends Stack {
     let hostType: InstanceType;
     let singleNodeInstance: Instance;
 
-    const clusterLogGroup = new LogGroup(this, 'opensearchLogGroup', {
-      logGroupName: `${id}LogGroup/opensearch.log`,
+    const clusterLogGroup = new LogGroup(this, 'elasticsearchLogGroup', {
+      logGroupName: `${id}LogGroup/elasticsearch.log`,
       retention: RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
     });
@@ -100,6 +128,9 @@ export class InfraStack extends Stack {
       });
     } else {
       this.instanceRole = <Role>Role.fromRoleArn(this, 'custom-role-arn', `${props.customRoleArn}`);
+    }
+    if (props.captureProxyEnabled) {
+      this.addKafkaProducerIAMPolicies(this.instanceRole);
     }
 
     if (props.enableRemoteStore) {
@@ -128,12 +159,12 @@ export class InfraStack extends Stack {
     });
 
     if (!props.securityDisabled && !props.minDistribution) {
-      opensearchListener = nlb.addListener('opensearch', {
+      opensearchListener = nlb.addListener('elasticsearch', {
         port: 443,
         protocol: Protocol.TCP,
       });
     } else {
-      opensearchListener = nlb.addListener('opensearch', {
+      opensearchListener = nlb.addListener('elasticsearch', {
         port: 80,
         protocol: Protocol.TCP,
       });
@@ -145,6 +176,12 @@ export class InfraStack extends Stack {
         protocol: Protocol.TCP,
       });
     }
+
+    // Workaround to add security group to NLB - see https://github.com/aws/aws-cdk/issues/26735
+    const cfnlb = (nlb.node.defaultChild as CfnLoadBalancer);
+    cfnlb.addPropertyOverride('SecurityGroups', [
+      props.securityGroup.securityGroupId,
+    ]);
 
     if (props.singleNodeCluster) {
       console.log('Single node value is true, creating single node configurations');
@@ -352,7 +389,7 @@ export class InfraStack extends Stack {
         Tags.of(mlNodeAsg).add('role', 'ml-node');
       }
 
-      opensearchListener.addTargets('opensearchTarget', {
+      opensearchListener.addTargets('elasticsearchTarget', {
         port: 9200,
         targets: [clientNodeAsg],
       });
@@ -420,7 +457,7 @@ export class InfraStack extends Stack {
               files: {
                 collect_list: [
                   {
-                    file_path: `/home/ec2-user/opensearch/logs/${scope.stackName}-${scope.account}-${scope.region}.log`,
+                    file_path: `/home/ec2-user/elasticsearch/logs/${scope.stackName}-${scope.account}-${scope.region}.log`,
                     log_group_name: `${logGroup.logGroupName.toString()}`,
                     // eslint-disable-next-line no-template-curly-in-string
                     log_stream_name: '{instance_id}',
@@ -436,22 +473,22 @@ export class InfraStack extends Stack {
       // eslint-disable-next-line max-len
       InitCommand.shellCommand('set -ex;/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s'),
       InitCommand.shellCommand('set -ex; sudo echo "vm.max_map_count=262144" >> /etc/sysctl.conf;sudo sysctl -p'),
-      InitCommand.shellCommand(`set -ex;mkdir opensearch; curl -L ${props.distributionUrl} -o opensearch.tar.gz;`
-        + 'tar zxf opensearch.tar.gz -C opensearch --strip-components=1; chown -R ec2-user:ec2-user opensearch;', {
+      InitCommand.shellCommand(`set -ex;mkdir elasticsearch; curl -L ${props.distributionUrl} -o elasticsearch.tar.gz;`
+        + 'tar zxf elasticsearch.tar.gz -C elasticsearch --strip-components=1; chown -R ec2-user:ec2-user elasticsearch;', {
         cwd: '/home/ec2-user',
         ignoreErrors: false,
       }),
       InitCommand.shellCommand('sleep 15'),
     ];
 
-    // Add opensearch.yml config
+    // Add elasticsearch.yml config
     if (props.singleNodeCluster) {
       const fileContent: any = load(readFileSync(`${configFileDir}/single-node-base-config.yml`, 'utf-8'));
 
       fileContent['cluster.name'] = `${scope.stackName}-${scope.account}-${scope.region}`;
 
       opensearchConfig = dump(fileContent).toString();
-      cfnInitConfig.push(InitCommand.shellCommand(`set -ex;cd opensearch; echo "${opensearchConfig}" > config/opensearch.yml`,
+      cfnInitConfig.push(InitCommand.shellCommand(`set -ex;cd elasticsearch; echo "${opensearchConfig}" > config/elasticsearch.yml`,
         {
           cwd: '/home/ec2-user',
         }));
@@ -463,8 +500,13 @@ export class InfraStack extends Stack {
       // use discovery-ec2 to find manager nodes by querying IMDS
       baseConfig['discovery.ec2.tag.Name'] = `${scope.stackName}/seedNodeAsg,${scope.stackName}/managerNodeAsg`;
 
+      // // Change default port to 19200 to allow capture proxy at 9200
+      // if (nodeType && (nodeType === 'manager' || nodeType === 'seed-manager')) {
+      //   baseConfig['http.port'] = 19200;
+      // }
+
       const commonConfig = dump(baseConfig).toString();
-      cfnInitConfig.push(InitCommand.shellCommand(`set -ex;cd opensearch; echo "${commonConfig}" > config/opensearch.yml`,
+      cfnInitConfig.push(InitCommand.shellCommand(`set -ex;cd elasticsearch; echo "${commonConfig}" > config/elasticsearch.yml`,
         {
           cwd: '/home/ec2-user',
         }));
@@ -472,21 +514,14 @@ export class InfraStack extends Stack {
       if (nodeType != null) {
         const nodeTypeConfig = nodeConfig.get(nodeType);
         const nodeConfigData = dump(nodeTypeConfig).toString();
-        cfnInitConfig.push(InitCommand.shellCommand(`set -ex;cd opensearch; echo "${nodeConfigData}" >> config/opensearch.yml`,
+        cfnInitConfig.push(InitCommand.shellCommand(`set -ex;cd elasticsearch; echo "${nodeConfigData}" >> config/elasticsearch.yml`,
           {
             cwd: '/home/ec2-user',
           }));
       }
 
-      if (props.distributionUrl.includes('artifacts.opensearch.org') && !props.minDistribution) {
-        cfnInitConfig.push(InitCommand.shellCommand('set -ex;cd opensearch;sudo -u ec2-user bin/opensearch-plugin install discovery-ec2 --batch', {
-          cwd: '/home/ec2-user',
-          ignoreErrors: false,
-        }));
-      } else {
-        cfnInitConfig.push(InitCommand.shellCommand('set -ex;cd opensearch;sudo -u ec2-user bin/opensearch-plugin install '
-          + `https://ci.opensearch.org/ci/dbc/distribution-build-opensearch/${props.opensearchVersion}/latest/linux/${props.cpuArch}`
-          + `/tar/builds/opensearch/core-plugins/discovery-ec2-${props.opensearchVersion}.zip --batch`, {
+      if (!props.minDistribution) {
+        cfnInitConfig.push(InitCommand.shellCommand('set -ex;cd elasticsearch;sudo -u ec2-user bin/elasticsearch-plugin install discovery-ec2 --batch', {
           cwd: '/home/ec2-user',
           ignoreErrors: false,
         }));
@@ -525,6 +560,7 @@ export class InfraStack extends Stack {
       }
     }
 
+    /** Commenting this out for now, with the understanding that the security setting will not work
     if (props.distributionUrl.includes('artifacts.opensearch.org') && !props.minDistribution) {
       cfnInitConfig.push(InitCommand.shellCommand('set -ex;cd opensearch;sudo -u ec2-user bin/opensearch-plugin install repository-s3 --batch', {
         cwd: '/home/ec2-user',
@@ -548,12 +584,13 @@ export class InfraStack extends Stack {
           ignoreErrors: false,
         }));
     }
+   */
 
     // Check if there are any jvm properties being passed
     // @ts-ignore
     if (props.jvmSysPropsString.toString() !== 'undefined') {
       // @ts-ignore
-      cfnInitConfig.push(InitCommand.shellCommand(`set -ex; cd opensearch; jvmSysPropsList=$(echo "${props.jvmSysPropsString.toString()}" | tr ',' '\\n');`
+      cfnInitConfig.push(InitCommand.shellCommand(`set -ex; cd elasticsearch; jvmSysPropsList=$(echo "${props.jvmSysPropsString.toString()}" | tr ',' '\\n');`
         + 'for sysProp in $jvmSysPropsList;do echo "-D$sysProp" >> config/jvm.options;done',
       {
         cwd: '/home/ec2-user',
@@ -564,7 +601,7 @@ export class InfraStack extends Stack {
     // Check if JVM Heap Memory is set. Default is 1G in the jvm.options file
     // @ts-ignore
     if (props.use50PercentHeap) {
-      cfnInitConfig.push(InitCommand.shellCommand(`set -ex; cd opensearch;
+      cfnInitConfig.push(InitCommand.shellCommand(`set -ex; cd elasticsearch;
       totalMem=\`expr $(free -g | awk '/^Mem:/{print $2}') + 1\`;
       heapSizeInGb=\`expr $totalMem / 2\`;
       if [ $heapSizeInGb -lt 32 ];then minHeap="-Xms"$heapSizeInGb"g";maxHeap="-Xmx"$heapSizeInGb"g";else minHeap="-Xms32g";maxHeap="-Xmx32g";fi
@@ -578,26 +615,33 @@ export class InfraStack extends Stack {
     // @ts-ignore
     if (props.additionalConfig.toString() !== 'undefined') {
       // @ts-ignore
-      cfnInitConfig.push(InitCommand.shellCommand(`set -ex; cd opensearch; echo "${props.additionalConfig}">>config/opensearch.yml`,
+      cfnInitConfig.push(InitCommand.shellCommand(`set -ex; cd elasticsearch; echo "${props.additionalConfig}">>config/elasticsearch.yml`,
         {
           cwd: '/home/ec2-user',
           ignoreErrors: false,
         }));
     }
 
-    // // Startinng OpenSearch based on whether the distribution type is min or bundle
-    if (props.minDistribution) { // using (stackProps.minDistribution) condition is not working when false value is being sent
-      cfnInitConfig.push(InitCommand.shellCommand('set -ex;cd opensearch; sudo -u ec2-user nohup ./bin/opensearch >> install.log 2>&1 &',
+    // Final run command for elasticsearch
+    cfnInitConfig.push(InitCommand.shellCommand('set -ex;cd elasticsearch; sudo -u ec2-user nohup ./bin/elasticsearch >> install.log 2>&1 &',
+      {
+        cwd: '/home/ec2-user',
+        ignoreErrors: false,
+      }));
+
+    // Download and unpack capture proxy as well as add capture proxy startup script. Currently, places capture proxy required files
+    // on all nodes but only Coordinator nodes need
+    if (props.captureProxyEnabled) {
+      // eslint-disable-next-line max-len
+      cfnInitConfig.push(InitCommand.shellCommand(`set -ex; curl -L0 ${props.captureProxyTarUrl} --output CaptureProxyX64.tar.gz; tar -xvf CaptureProxyX64.tar.gz;`,
         {
-          cwd: '/home/ec2-user',
+          cwd: '/home/ec2-user/capture-proxy',
           ignoreErrors: false,
         }));
-    } else {
-      cfnInitConfig.push(InitCommand.shellCommand('set -ex;cd opensearch; sudo -u ec2-user nohup ./opensearch-tar-install.sh >> install.log 2>&1 &',
-        {
-          cwd: '/home/ec2-user',
-          ignoreErrors: false,
-        }));
+      const startProxyFile = InitFile.fromFileInline('/home/ec2-user/capture-proxy/startCaptureProxy.sh', './startCaptureProxy.sh', {
+        mode: '000744',
+      });
+      cfnInitConfig.push(startProxyFile);
     }
 
     // If OpenSearch-Dashboards URL is present

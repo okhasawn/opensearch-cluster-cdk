@@ -1,5 +1,6 @@
 # CDK for deploying single-node and multi-node OpenSearch cluster with OpenSearch Dashboards
 
+### :warning: This branch is a WIP spin-off to support having an elasticsearch EC2 cluster with a capture proxy folder and script readily available to enable the capture proxy. Some features are not operational (enabling security, starting dashboards, remote store)
 - [Getting Started](#getting-started)
 - [Deployment](#deployment)
   - [Required context parameters](#required-context-parameters)

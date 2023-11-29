@@ -96,6 +96,16 @@ export class OsClusterEntrypoint {
         throw new Error('distributionUrl parameter is required. Please provide the artifact url to download');
       }
 
+      const captureProxyEnabled = `${scope.node.tryGetContext('captureProxyEnabled')}`;
+      if (captureProxyEnabled !== 'true' && captureProxyEnabled !== 'false') {
+        throw new Error('captureProxyEnabled parameter is required to be set as - true or false');
+      }
+      const captureProxy = captureProxyEnabled === 'true';
+      const captureProxyTarUrl = `${scope.node.tryGetContext('captureProxyTarUrl')}`;
+      if (captureProxy && captureProxyTarUrl.toString() === 'undefined') {
+        throw new Error('captureProxyTarUrl parameter is required. Please provide the capture proxy tar url to download');
+      }
+
       const dashboardUrl = `${scope.node.tryGetContext('dashboardsUrl')}`;
 
       const cpuArch = `${scope.node.tryGetContext('cpuArch')}`;
@@ -256,6 +266,8 @@ export class OsClusterEntrypoint {
         dashboardsUrl: dashboardUrl,
         dataNodeCount: dataCount,
         distributionUrl,
+        captureProxyEnabled: captureProxy,
+        captureProxyTarUrl,
         ingestNodeCount: ingestCount,
         managerNodeCount: managerCount,
         minDistribution: minDist,
