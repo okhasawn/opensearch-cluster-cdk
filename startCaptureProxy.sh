@@ -35,6 +35,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [ -z "$KAFKA_ENDPOINTS" ]; then
+  echo "Required --kafka-endpoints argument is missing"
+  exit 1
+fi
+# Allow @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
+KAFKA_ENDPOINTS=$(echo "$KAFKA_ENDPOINTS" | tr '@' ',')
+
 es_pid=$(pgrep -f "bin/elasticsearch" || echo "")
 if [ -z "$es_pid" ]; then
   echo "No running Elasticsearch process detected"
