@@ -62,7 +62,7 @@ if [ -n "$es_pid" ] && [ -n "$capture_pid" ]; then
 fi
 
 cd /home/ec2-user/elasticsearch/config
-es_http_port_entry=$(cat elasticsearch.yml | grep "http.port")
+es_http_port_entry=$(cat elasticsearch.yml | grep "http.port" || echo "")
 es_needs_restart=false
 if [ -z "$es_http_port_entry" ]; then
   echo "Appending 'http.port: 19200' to elasticsearch.yml"
