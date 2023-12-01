@@ -57,6 +57,7 @@ export class OsClusterEntrypoint {
       let clientCount: number;
       let ingestCount: number;
       let mlCount: number;
+      let zoneCount: number;
       let infraStackName: string;
       let dataNodeStorage: number;
       let mlNodeStorage: number;
@@ -226,6 +227,13 @@ export class OsClusterEntrypoint {
 
       const customRoleArn = `${scope.node.tryGetContext('customRoleArn')}`;
 
+      const networkAvailabilityZones = `${scope.node.tryGetContext('networkAvailabilityZones')}`;
+      if (networkAvailabilityZones === 'undefined') {
+        zoneCount = 3;
+      } else {
+        zoneCount = parseInt(networkAvailabilityZones, 10);
+      }
+
       let networkStackName = 'opensearch-network-stack';
       if (networkStackSuffix !== 'undefined') {
         networkStackName = `opensearch-network-stack-${networkStackSuffix}`;
@@ -233,7 +241,7 @@ export class OsClusterEntrypoint {
 
       const network = new NetworkStack(scope, networkStackName, {
         cidrBlock: cidrRange,
-        maxAzs: 3,
+        maxAzs: zoneCount,
         vpcId,
         securityGroupId,
         serverAccessType,
