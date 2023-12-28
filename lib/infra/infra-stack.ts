@@ -105,7 +105,6 @@ export class InfraStack extends Stack {
   constructor(scope: Stack, id: string, props: infraProps) {
     super(scope, id, props);
     let opensearchListener: NetworkListener;
-    let opensearchListener19200: NetworkListener;
     let dashboardsListener: NetworkListener;
     let managerAsgCapacity: number;
     let dataAsgCapacity: number;
@@ -159,21 +158,29 @@ export class InfraStack extends Stack {
       crossZoneEnabled: true,
     });
 
-    if (!props.securityDisabled && !props.minDistribution) {
-      opensearchListener = nlb.addListener('elasticsearch', {
-        port: 443,
-        protocol: Protocol.TCP,
-      });
-    } else {
-      opensearchListener = nlb.addListener('elasticsearch', {
-        port: 9200,
-        protocol: Protocol.TCP,
-      });
-      opensearchListener19200 = nlb.addListener('elasticsearch', {
-        port: 19200,
-        protocol: Protocol.TCP,
-      });
-    }
+// Modify existing listener to use port 9200
+    opensearchListener = nlb.addListener('opensearch', {
+      port: 9200,
+      protocol: Protocol.TCP,
+    });
+
+// Add a new listener for port 19200
+    const opensearchListener19200 = nlb.addListener('opensearch19200', {
+      port: 19200,
+      protocol: Protocol.TCP,
+    });
+
+// Add targets for opensearchListener
+    opensearchListener.addTargets('opensearchTarget', {
+      port: 9200,
+      targets: [clientNodeAsg],
+    });
+
+// Add targets for opensearchListener19200
+    opensearchListener19200.addTargets('opensearchTarget19200', {
+      port: 19200,
+      targets: [clientNodeAsg],
+    });
 
     if (props.dashboardsUrl !== 'undefined') {
       dashboardsListener = nlb.addListener('dashboards', {
@@ -216,10 +223,6 @@ export class InfraStack extends Stack {
 
       opensearchListener.addTargets('single-node-target', {
         port: 9200,
-        targets: [new InstanceTarget(singleNodeInstance)],
-      });
-      opensearchListener19200.addTargets('single-node-target', {
-        port: 19200,
         targets: [new InstanceTarget(singleNodeInstance)],
       });
 
@@ -400,10 +403,6 @@ export class InfraStack extends Stack {
 
       opensearchListener.addTargets('elasticsearchTarget', {
         port: 9200,
-        targets: [clientNodeAsg],
-      });
-      opensearchListener19200.addTargets('elasticsearchTarget', {
-        port: 19200,
         targets: [clientNodeAsg],
       });
 
