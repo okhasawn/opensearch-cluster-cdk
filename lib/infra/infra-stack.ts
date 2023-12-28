@@ -105,6 +105,7 @@ export class InfraStack extends Stack {
   constructor(scope: Stack, id: string, props: infraProps) {
     super(scope, id, props);
     let opensearchListener: NetworkListener;
+    let opensearchListener19200: NetworkListener;
     let dashboardsListener: NetworkListener;
     let managerAsgCapacity: number;
     let dataAsgCapacity: number;
@@ -165,11 +166,11 @@ export class InfraStack extends Stack {
       });
     } else {
       opensearchListener = nlb.addListener('elasticsearch', {
-        port: 19200,
+        port: 9200,
         protocol: Protocol.TCP,
       });
-      opensearchListener = nlb.addListener('elasticsearch', {
-        port: 9200,
+      opensearchListener19200 = nlb.addListener('elasticsearch', {
+        port: 19200,
         protocol: Protocol.TCP,
       });
     }
@@ -217,7 +218,7 @@ export class InfraStack extends Stack {
         port: 9200,
         targets: [new InstanceTarget(singleNodeInstance)],
       });
-      opensearchListener.addTargets('single-node-target', {
+      opensearchListener19200.addTargets('single-node-target', {
         port: 19200,
         targets: [new InstanceTarget(singleNodeInstance)],
       });
@@ -401,7 +402,7 @@ export class InfraStack extends Stack {
         port: 9200,
         targets: [clientNodeAsg],
       });
-      opensearchListener.addTargets('elasticsearchTarget', {
+      opensearchListener19200.addTargets('elasticsearchTarget', {
         port: 19200,
         targets: [clientNodeAsg],
       });
