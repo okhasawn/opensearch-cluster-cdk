@@ -77,6 +77,7 @@ export class InfraStack extends Stack {
   constructor(scope: Stack, id: string, props: infraProps) {
     super(scope, id, props);
     let opensearchListener: NetworkListener;
+    let opensearchListener19200: NetworkListener;
     let dashboardsListener: NetworkListener;
     let managerAsgCapacity: number;
     let dataAsgCapacity: number;
@@ -134,7 +135,11 @@ export class InfraStack extends Stack {
       });
     } else {
       opensearchListener = nlb.addListener('opensearch', {
-        port: 80,
+        port: 9200,
+        protocol: Protocol.TCP,
+      });
+      opensearchListener19200 = nlb.addListener('opensearch', {
+        port: 19200,
         protocol: Protocol.TCP,
       });
     }
@@ -174,6 +179,10 @@ export class InfraStack extends Stack {
 
       opensearchListener.addTargets('single-node-target', {
         port: 9200,
+        targets: [new InstanceTarget(singleNodeInstance)],
+      });
+      opensearchListener19200.addTargets('single-node-target', {
+        port: 19200,
         targets: [new InstanceTarget(singleNodeInstance)],
       });
 
@@ -354,6 +363,10 @@ export class InfraStack extends Stack {
 
       opensearchListener.addTargets('opensearchTarget', {
         port: 9200,
+        targets: [clientNodeAsg],
+      });
+      opensearchListener19200.addTargets('opensearchTarget', {
+        port: 19200,
         targets: [clientNodeAsg],
       });
 
