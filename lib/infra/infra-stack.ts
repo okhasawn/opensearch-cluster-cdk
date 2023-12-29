@@ -160,16 +160,16 @@ export class InfraStack extends Stack {
     });
 
     if (!props.securityDisabled && !props.minDistribution) {
-      opensearchListener = nlb.addListener('elasticsearch', {
+      opensearchListener = nlb.addListener('elasticsearchHTTPS', {
         port: 443,
         protocol: Protocol.TCP,
       });
     } else {
-      opensearchListener = nlb.addListener('elasticsearch', {
+      opensearchListener = nlb.addListener('elasticsearch9200', {
         port: 9200,
         protocol: Protocol.TCP,
       });
-      opensearchListener19200 = nlb.addListener('elasticsearch', {
+      opensearchListener19200 = nlb.addListener('elasticsearch19200', {
         port: 19200,
         protocol: Protocol.TCP,
       });
