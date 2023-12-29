@@ -164,6 +164,10 @@ export class InfraStack extends Stack {
         port: 443,
         protocol: Protocol.TCP,
       });
+      opensearchListener19200 = nlb.addListener('elasticsearchHTTP', {
+        port: 80, // or some other port that makes sense in this context
+        protocol: Protocol.TCP,
+      });
     } else {
       opensearchListener = nlb.addListener('elasticsearch9200', {
         port: 9200,
