@@ -159,25 +159,16 @@ export class InfraStack extends Stack {
       crossZoneEnabled: true,
     });
 
-    if (!props.securityDisabled && !props.minDistribution) {
-      opensearchListener = nlb.addListener('elasticsearchHTTPS', {
-        port: 443,
-        protocol: Protocol.TCP,
-      });
-      opensearchListener19200 = nlb.addListener('elasticsearchHTTP', {
-        port: 80, // or some other port that makes sense in this context
-        protocol: Protocol.TCP,
-      });
-    } else {
-      opensearchListener = nlb.addListener('elasticsearch9200', {
-        port: 9200,
-        protocol: Protocol.TCP,
-      });
-      opensearchListener19200 = nlb.addListener('elasticsearch19200', {
-        port: 19200,
-        protocol: Protocol.TCP,
-      });
-    }
+
+    opensearchListener = nlb.addListener('elasticsearch9200', {
+      port: 9200,
+      protocol: Protocol.TCP,
+    });
+    opensearchListener19200 = nlb.addListener('elasticsearch19200', {
+      port: 19200,
+      protocol: Protocol.TCP,
+    });
+
 
     if (props.dashboardsUrl !== 'undefined') {
       dashboardsListener = nlb.addListener('dashboards', {
